@@ -1,1 +1,1 @@
-# Storystudio
+# storystudio-api
