@@ -26,8 +26,8 @@ export default {
         return new Response(JSON.stringify({ error: "API Key सेट नहीं की गई है!" }), { status: 500, headers: { ...headers, "Content-Type": "application/json" } });
       }
 
-      // आपका Gemini 2.5 Flash मॉडल ही रखा गया है
-      const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`;
+      // यहाँ मॉडल को 2.5 से बदलकर 3.6 कर दिया गया है 👇
+      const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${GEMINI_API_KEY}`;
 
       const geminiResponse = await fetch(apiUrl, {
         method: "POST",
@@ -37,7 +37,6 @@ export default {
 
       const data = await geminiResponse.json();
 
-      // बदलाव यहाँ है: अब अगर Google से कोई एरर आएगा, तो वह सीधा स्क्रीन पर दिखेगा 👇
       if (data.error) {
         return new Response(JSON.stringify({ error: "Gemini Error: " + data.error.message }), { status: 500, headers: { ...headers, "Content-Type": "application/json" } });
       }
