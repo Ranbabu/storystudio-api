@@ -1,24 +1,26 @@
 // =====================================================
-// Aryan Studio Pro - Gemini Worker v14 (ULTRA SAFE MODE)
-// ✅ 1 API Key के लिए भी 100% सुरक्षित (Mathematical Auto-Delay)
+// Aryan Studio Pro - Gemini AI Worker v15 (2026 Models Update)
+// ✅ FIX: Removed deprecated 2.0 models
+// ✅ ADDED: gemini-3.6-flash & gemini-3.5-flash-lite
+// ✅ Ultra Safe Burst Control (Anti 502/429)
 // =====================================================
 
 // 🔑 तरीका 1: यहाँ hardcoded keys (optional)
 const HARDCODED_KEYS = [];
 
-// ✅ सही MODELS
+// ✅ सही और ACTIVE MODELS (Google के नए 2026 अपडेट के अनुसार)
 const MODELS = [
-  "gemini-2.5-flash",       // PRIMARY (सबसे तेज़)
-  "gemini-2.5-pro",         // BACKUP
-  "gemini-1.5-flash"        // FALLBACK
+  "gemini-2.5-flash",       // PRIMARY (सबसे तेज़ और बड़े डेटा के लिए बेस्ट)
+  "gemini-3.6-flash",       // BACKUP 1 (2.0-flash की जगह नया मॉडल)
+  "gemini-3.5-flash-lite"   // BACKUP 2 (2.0-flash-lite की जगह नया तेज़ मॉडल)
 ];
 
 // ग्लोबल वेरिएबल: लगातार आने वाली रिक्वेस्ट को कंट्रोल करने के लिए
 let lastRequestTimestamp = 0;
 
 // 🛡️ ULTRA SAFE TIMERS (मिलीसेकंड में)
-const MIN_DELAY = 4500;     // 4.5 सेकंड का फिक्स गैप (15 RPM लिमिट कभी क्रॉस नहीं होगी)
-const RETRY_DELAY = 5000;   // एरर आने पर 5 सेकंड का फुल रेस्ट
+const MIN_DELAY = 4500;     // 4.5 सेकंड का फिक्स गैप (Rate Limit से बचने के लिए)
+const RETRY_DELAY = 5000;   // एरर आने पर 5 सेकंड का रेस्ट
 const INVALID_DELAY = 2000; // Invalid argument पर 2 सेकंड का ब्रेक
 
 // 🕒 स्लीप/वेट फंक्शन
@@ -41,13 +43,19 @@ function collectKeys(env) {
   return Array.from(keys).filter(k => k.length > 10);
 }
 
-// ✅ Model config
+// ✅ Model config (बड़ी न्यूज़ स्क्रिप्ट के लिए Max Tokens)
 function buildGenerationConfig(model, maxTokens) {
-  return {
+  const config = {
     maxOutputTokens: maxTokens,
     temperature: 0.7, 
     topP: 0.95
   };
+  
+  // नए 3.x और 2.5 मॉडल्स के लिए Thinking Budget को disable करना ज़रूरी है
+  if (model.includes("2.5") || model.includes("3.")) {
+      config.thinkingConfig = { thinkingBudget: 0 };
+  }
+  return config;
 }
 
 export default {
@@ -65,11 +73,10 @@ export default {
       const keys = collectKeys(env);
       return new Response(JSON.stringify({
         status: "ok ✅",
-        worker: "Aryan Studio Pro - Gemini Worker v14 (Ultra Safe)",
+        worker: "Aryan Studio Pro - Gemini Worker v15",
         totalKeysLoaded: keys.length,
         modelsActive: MODELS,
-        protection: "Mathematical Auto-Delay (4.5s) & Load Balancing Active 🛡️",
-        statusMsg: "अब 1 API Key पर भी 502/429 एरर नहीं आएगा।"
+        protection: "Mathematical Auto-Delay (4.5s) Active 🛡️"
       }), { headers });
     }
 
@@ -91,19 +98,18 @@ export default {
 
       const keys = collectKeys(env);
       if (keys.length === 0) {
-        return new Response(JSON.stringify({ error: "❌ कोई API Key नहीं मिली!" }), { status: 500, headers });
+        return new Response(JSON.stringify({ error: "❌ कोई API Key नहीं मिली! Worker Settings में GEMINI_KEYS डालें।" }), { status: 500, headers });
       }
 
       const maxTokens = Math.min(8192, parseInt(requestData.maxTokens) || 8192);
       const errors = [];
       let lastQuotaMsg = "";
 
-      // 🛑 MATHEMATICAL BURST CONTROL (सबसे महत्वपूर्ण हिस्सा)
-      // यह तय करेगा कि पिछली रिक्वेस्ट के बाद 4.5 सेकंड बीत चुके हों
+      // 🛑 MATHEMATICAL BURST CONTROL
       const now = Date.now();
       const timeSinceLast = now - lastRequestTimestamp;
       if (timeSinceLast < MIN_DELAY) {
-        await sleep(MIN_DELAY - timeSinceLast); // बचे हुए समय के लिए कोड को सुला दो
+        await sleep(MIN_DELAY - timeSinceLast);
       }
       lastRequestTimestamp = Date.now();
 
@@ -127,7 +133,7 @@ export default {
             });
             let data = await res.json().catch(() => ({}));
 
-            // ✅ FIX: Invalid argument आने पर 2 सेकंड रुकें, फिर बिना कॉन्फ़िगरेशन के ट्राई करें
+            // ✅ Invalid argument आने पर बिना कॉन्फ़िगरेशन के ट्राई करें
             if (data.error && /invalid argument/i.test(data.error.message)) {
               await sleep(INVALID_DELAY); 
               res = await fetch(apiUrl, {
@@ -138,26 +144,27 @@ export default {
               data = await res.json().catch(() => ({}));
             }
 
-            // ❌ Error handling & Heavy Retry Logic
+            // ❌ Error handling
             if (data.error) {
               const msg = data.error.message || "unknown";
               errors.push(`${keyTag} → ${model}: ${msg.substring(0, 80)}`);
 
-              // Quota / Rate Limit (429) - 5 सेकंड का फुल रेस्ट!
+              // Quota / Rate Limit (429) - 5 सेकंड रेस्ट!
               if (/quota|429|RESOURCE_EXHAUSTED|retry in/i.test(msg)) {
                 lastQuotaMsg = msg; 
                 keyDead = true; 
                 await sleep(RETRY_DELAY); 
                 break; 
               }
-              // Google Server Crash (500/502) - 5 सेकंड रेस्ट
-              if (/500|502|internal|backend/i.test(msg)) {
+              // Google Server Crash (500/502)
+              if (/500|502|internal|backend|no longer available/i.test(msg)) {
                 await sleep(RETRY_DELAY);
+                continue; // मॉडल बंद है या क्रैश है, तो अगले मॉडल पर जाएं
               }
               if (/API key not valid|API_KEY_INVALID/i.test(msg)) {
-                continue; // गलत Key
+                continue; 
               }
-              continue; // अगला मॉडल ट्राई करें
+              continue; 
             }
 
             // ✅ SUCCESS: रिजल्ट मिल गया
@@ -177,9 +184,8 @@ export default {
         if (keyDead) continue; 
       } 
 
-      // अगर सभी Keys फेल हो जाएं
       const finalError = lastQuotaMsg 
-        ? `Limit Reached! 5-10 सेकंड बाद फिर कोशिश करें। (${lastQuotaMsg})` 
+        ? `लिमिट पार हो गई है! 10-15 सेकंड बाद फिर कोशिश करें।` 
         : `सभी API Keys फेल:\n• ${errors.slice(0, 4).join("\n• ")}`;
 
       return new Response(JSON.stringify({ error: finalError }), {
