@@ -1,21 +1,15 @@
 // =====================================================
-// Aryan Studio Pro - Gemini Worker v11
-// ✅ FIX: gemini-3.x पर thinkingBudget हटाया (invalid argument solved)
-// ✅ FIX: सही models list (3.6-flash + 3.5-flash-lite)
-// ✅ FIX: invalid argument पर auto minimal-config retry
+// Aryan Studio Pro - Gemini Worker v12 (Script Optimizer)
 // =====================================================
 
 // 🔑 तरीका 1: यहाँ hardcoded keys (optional)
-const HARDCODED_KEYS = [
-  // "AIzaSy..._key1",
-];
+const HARDCODED_KEYS = [];
 
-// ✅ सही MODELS (Sept 2026 verified - Google errors से confirmed)
+// ✅ सही MODELS (बड़ी स्क्रिप्ट जनरेशन के लिए)
 const MODELS = [
-  "gemini-3.6-flash",       // ✅ PRIMARY (1,500/day)
-  "gemini-3.5-flash-lite",  // ✅ LITE BACKUP
-  "gemini-2.5-flash",       // पुराने accounts के लिए fallback
-  "gemini-2.5-flash-lite"   // पुराने accounts के लिए fallback
+  "gemini-2.5-flash",       // ✅ PRIMARY (Super fast & best for long scripts)
+  "gemini-2.5-pro",         // ✅ BACKUP (High quality)
+  "gemini-1.5-flash"        // ✅ FALLBACK (Stable)
 ];
 
 // Keys collect — hardcoded + env दोनों से
@@ -35,23 +29,14 @@ function collectKeys(env) {
   return Array.from(keys).filter(k => k.length > 10);
 }
 
-// ✅ Model के हिसाब से सही config (यहीं असली fix है!)
+// ✅ Model के हिसाब से सही config (बड़ी स्क्रिप्ट के लिए Max Tokens)
 function buildGenerationConfig(model, maxTokens) {
-  const cfg = { maxOutputTokens: maxTokens };
-
-  if (model.startsWith("gemini-3")) {
-    // ❌ gemini-3.x में thinkingBudget INVALID है!
-    // ✅ सिर्फ temperature भेजो, thinking config बिल्कुल नहीं
-    cfg.temperature = 1.0;
-  } else if (model.startsWith("gemini-2.5")) {
-    cfg.temperature = 0.95;
-    cfg.topP = 0.98;
-    cfg.thinkingConfig = { thinkingBudget: 0 }; // 2.5 में यह जरूरी है
-  } else {
-    cfg.temperature = 0.95;
-    cfg.topP = 0.98;
-  }
-  return cfg;
+  // न्यूज़ स्क्रिप्ट के लिए 8192 टोकन लिमिट सेट की गई है
+  return {
+    maxOutputTokens: maxTokens,
+    temperature: 0.7, // 0.7 न्यूज़ के लिए परफेक्ट है (फैक्ट्स और क्रिएटिविटी का बैलेंस)
+    topP: 0.95
+  };
 }
 
 export default {
@@ -70,10 +55,10 @@ export default {
       const keys = collectKeys(env);
       return new Response(JSON.stringify({
         status: "ok ✅",
-        worker: "Aryan Studio Pro - Gemini Worker v11",
-        totalKeys: keys.length,
-        models: MODELS,
-        quota: "1,500 requests/day per key",
+        worker: "Aryan Studio Pro - Gemini Worker v12",
+        totalKeysLoaded: keys.length,
+        modelsActive: MODELS,
+        quota: `${keys.length * 1500} requests/day (Combined)`,
         reset: "हर 24 घंटे"
       }), { headers });
     }
@@ -103,7 +88,7 @@ export default {
       const keys = collectKeys(env);
       if (keys.length === 0) {
         return new Response(JSON.stringify({
-          error: "❌ कोई key नहीं! Worker Settings → Variables में GEMINI_API_KEY डालें।"
+          error: "❌ कोई key नहीं! Worker Settings → Variables में GEMINI_KEYS डालें।"
         }), { status: 500, headers });
       }
 
@@ -129,7 +114,7 @@ export default {
             });
             let data = await res.json().catch(() => ({}));
 
-            // ✅ FIX: invalid argument → minimal config से retry (बिना generationConfig)
+            // ✅ FIX: invalid argument → minimal config से retry
             if (data.error && /invalid argument/i.test(data.error.message)) {
               res = await fetch(apiUrl, {
                 method: "POST",
