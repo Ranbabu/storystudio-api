@@ -1,16 +1,14 @@
 // =====================================================
-// Aryan Studio Pro - Universal AI Worker v2.0
-// Supports: Gemini 2.5 Flash & Groq Llama 3.3 (70B)
-// Auto Key Rotation + Smart Rate Limit Handling
+// Aryan Studio Pro - Universal AI Worker v3.0
+// Supports: Gemini 3.6 Flash & Groq Llama 3 70B
 // =====================================================
 
-const GEMINI_MODEL = "gemini-2.5-flash";
-const GROQ_MODEL = "llama-3.3-70b-versatile";
+const GEMINI_MODEL = "gemini-3.6-flash";      // ✅ Updated
+const GROQ_MODEL = "llama3-70b-8192";        // ✅ Updated (Free Tier)
 
 // ----- HELPER: Gemini API Call -----
 async function callGeminiAPI(apiKey, prompt, maxTokens = 4096) {
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`;
-    
     const payload = {
         contents: [{ role: "user", parts: [{ text: prompt }] }],
         generationConfig: {
@@ -20,15 +18,8 @@ async function callGeminiAPI(apiKey, prompt, maxTokens = 4096) {
             thinkingConfig: { thinkingBudget: 0 }
         }
     };
-
-    const res = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
-    });
-
+    const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
     const data = await res.json();
-
     if (!res.ok) {
         const errMsg = data.error?.message || "Unknown Error";
         if (res.status === 429 || errMsg.includes("quota") || errMsg.includes("rate limit")) {
@@ -36,7 +27,6 @@ async function callGeminiAPI(apiKey, prompt, maxTokens = 4096) {
         }
         throw new Error(`Gemini Error ${res.status}: ${errMsg}`);
     }
-
     const text = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
     if (!text) throw new Error("Empty response from Gemini");
     return text;
@@ -45,7 +35,6 @@ async function callGeminiAPI(apiKey, prompt, maxTokens = 4096) {
 // ----- HELPER: Groq API Call (OpenAI Compatible) -----
 async function callGroqAPI(apiKey, prompt, maxTokens = 4096) {
     const url = "https://api.groq.com/openai/v1/chat/completions";
-    
     const payload = {
         model: GROQ_MODEL,
         messages: [
@@ -56,18 +45,12 @@ async function callGroqAPI(apiKey, prompt, maxTokens = 4096) {
         max_tokens: maxTokens,
         response_format: { type: "json_object" }
     };
-
     const res = await fetch(url, {
         method: "POST",
-        headers: {
-            "Authorization": `Bearer ${apiKey}`,
-            "Content-Type": "application/json"
-        },
+        headers: { "Authorization": `Bearer ${apiKey}`, "Content-Type": "application/json" },
         body: JSON.stringify(payload)
     });
-
     const data = await res.json();
-
     if (!res.ok) {
         const errMsg = data.error?.message || "Unknown Error";
         if (res.status === 429 || errMsg.includes("rate limit")) {
@@ -75,7 +58,6 @@ async function callGroqAPI(apiKey, prompt, maxTokens = 4096) {
         }
         throw new Error(`Groq Error ${res.status}: ${errMsg}`);
     }
-
     const text = data.choices?.[0]?.message?.content || "";
     if (!text) throw new Error("Empty response from Groq");
     return text;
@@ -90,17 +72,13 @@ export default {
             "Access-Control-Allow-Headers": "Content-Type",
             "Content-Type": "application/json"
         };
-
         if (request.method === "OPTIONS") return new Response(null, { headers });
         if (request.method !== "POST") {
             return new Response(JSON.stringify({ error: "Method not allowed" }), { status: 405, headers });
         }
-
         try {
             const body = await request.json();
             const { engine, keys, action, data } = body;
-
-            // --- Validation ---
             if (!engine || !keys || keys.length === 0) {
                 return new Response(JSON.stringify({ error: "Engine or API Keys missing" }), { status: 400, headers });
             }
@@ -108,7 +86,6 @@ export default {
                 return new Response(JSON.stringify({ error: "Action or Data missing" }), { status: 400, headers });
             }
 
-            // --- Build Prompt based on Action ---
             let prompt = "";
             let maxTokens = 4096;
 
@@ -166,7 +143,6 @@ export default {
             // --- Engine Dispatcher with Auto Key Rotation ---
             let lastError = null;
             let keysToTry = [...keys];
-
             for (let i = 0; i < keysToTry.length; i++) {
                 const key = keysToTry[i];
                 try {
@@ -203,11 +179,11 @@ export default {
                         lastError = "Rate Limit on key " + (i+1);
                         continue;
                     } else {
+                        // Any other error (404, etc.) return immediately
                         return new Response(JSON.stringify({ error: errString }), { status: 500, headers });
                     }
                 }
             }
-
             return new Response(JSON.stringify({ 
                 error: "ALL_KEYS_RATE_LIMITED", 
                 message: "सभी API Keys की Rate Limit पार हो गई है। कृपया 1 मिनट बाद पुनः प्रयास करें।",
