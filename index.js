@@ -1,14 +1,14 @@
 // =====================================================
-// Aryan Studio Pro - Dedicated Gemini 2.5 Flash Worker (Fixed)
-// ✅ STRICT: 'gemini-2.5-flash' Model Active
-// ✅ Fixed URL Path Duplicate (/models/) Issue
-// ✅ Anti-Burst & Safe Key Rotation (Prevents 429/502)
+// Aryan Studio Pro - Dedicated Gemini 1.5 Flash Worker
+// ✅ STRICT: 'gemini-1.5-flash' Model Active (100% Free Tier Compatible)
+// ✅ URL Path Duplicate Check & Sanitizer
+// ✅ Anti-Burst & Safe Key-Rotation (Prevents 429/502)
 // =====================================================
 
 const HARDCODED_KEYS = [];
 
-// मॉडल केवल 2.5 Flash रहेगा
-const ACTIVE_MODEL = "gemini-2.5-flash";
+// ✅ Google AI Studio की फ्री की पर चलने वाला आधिकारिक एक्टिव मॉडल
+const ACTIVE_MODEL = "gemini-1.5-flash";
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -32,8 +32,7 @@ function buildGenerationConfig(maxTokens) {
   return {
     maxOutputTokens: maxTokens,
     temperature: 0.7,
-    topP: 0.95,
-    thinkingConfig: { thinkingBudget: 0 }
+    topP: 0.95
   };
 }
 
@@ -52,7 +51,7 @@ export default {
       const keys = collectKeys(env);
       return new Response(JSON.stringify({
         status: "ok ✅",
-        worker: "Aryan Studio Pro - Gemini 2.5 Dedicated Worker",
+        worker: "Aryan Studio Pro - Gemini 1.5 Flash Worker",
         totalKeysLoaded: keys.length,
         modelActive: ACTIVE_MODEL,
         protection: "Anti-429 & Safe Key-Rotation Active 🛡️"
@@ -104,7 +103,6 @@ export default {
           });
           let data = await res.json().catch(() => ({}));
 
-          // Invalid argument आने पर बिना कॉन्फ़िग के फ़ॉलबैक
           if (data.error && /invalid argument/i.test(data.error.message)) {
             await sleep(1500);
             res = await fetch(apiUrl, {
@@ -151,7 +149,7 @@ export default {
       }
 
       const finalError = rateLimitHit 
-        ? `सभी उपलब्ध Keys की मिनट लिमिट पूरी हो गई है। 10-15 सेकंड बाद फिर कोशिश करें।`
+        ? `सभी उपलब्ध Keys की मिनट लिमिट पूरी हो गई है। 10-15 सेकंड बाद पुनः प्रयास करें।`
         : `सभी API Keys विफल:\n• ${errors.slice(0, 3).join("\n• ")}`;
 
       return new Response(JSON.stringify({ error: finalError }), {
