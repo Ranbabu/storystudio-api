@@ -1,20 +1,17 @@
 // =====================================================
-// Aryan Studio Pro - Dedicated Gemini 2.5 Flash Worker
-// ✅ STRICT: Only 'gemini-2.5-flash' Model Active
-// ✅ Anti-Burst & Safe Key-Rotation (Prevents 429/502)
-// ✅ Mathematical Pacing for News Scripts
+// Aryan Studio Pro - Dedicated Gemini 2.5 Flash Worker (Fixed)
+// ✅ STRICT: 'gemini-2.5-flash' Model Active
+// ✅ Fixed URL Path Duplicate (/models/) Issue
+// ✅ Anti-Burst & Safe Key Rotation (Prevents 429/502)
 // =====================================================
 
-// 🔑 तरीका 1: यहाँ hardcoded keys (वैकल्पिक)
 const HARDCODED_KEYS = [];
 
-// ✅ मॉडल केवल 2.5 Flash रहेगा
+// मॉडल केवल 2.5 Flash रहेगा
 const ACTIVE_MODEL = "gemini-2.5-flash";
 
-// 🕒 स्लीप/वेट फंक्शन
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
-// Keys एकत्रित करने का फंक्शन
 function collectKeys(env) {
   const keys = new Set();
   HARDCODED_KEYS.forEach(k => k && keys.add(String(k).trim()));
@@ -31,13 +28,12 @@ function collectKeys(env) {
   return Array.from(keys).filter(k => k.length > 10);
 }
 
-// ✅ 2.5 Flash के लिए विशेष कॉन्फ़िगरेशन (बड़ी न्यूज़ स्क्रिप्ट के लिए)
 function buildGenerationConfig(maxTokens) {
   return {
     maxOutputTokens: maxTokens,
     temperature: 0.7,
     topP: 0.95,
-    thinkingConfig: { thinkingBudget: 0 } // Thinking Budget Disable ताकि तेज़ी से रिस्पॉन्स मिले
+    thinkingConfig: { thinkingBudget: 0 }
   };
 }
 
@@ -50,9 +46,7 @@ export default {
       "Content-Type": "application/json"
     };
 
-    if (request.method === "OPTIONS") {
-      return new Response(null, { headers });
-    }
+    if (request.method === "OPTIONS") return new Response(null, { headers });
 
     if (request.method === "GET") {
       const keys = collectKeys(env);
@@ -61,12 +55,12 @@ export default {
         worker: "Aryan Studio Pro - Gemini 2.5 Dedicated Worker",
         totalKeysLoaded: keys.length,
         modelActive: ACTIVE_MODEL,
-        protection: "Safe Key-Rotation & Anti-429 Enabled 🛡️"
+        protection: "Anti-429 & Safe Key-Rotation Active 🛡️"
       }), { headers });
     }
 
     if (request.method !== "POST") {
-      return new Response(JSON.stringify({ error: "केवल POST अनुरोध मान्य है" }), { status: 405, headers });
+      return new Response(JSON.stringify({ error: "केवल POST मान्य है" }), { status: 405, headers });
     }
 
     try {
@@ -90,15 +84,17 @@ export default {
       const errors = [];
       let rateLimitHit = false;
 
-      // 🔄 कीज़ को रैंडम शफल करें ताकि किसी एक की पर लोड न पड़े
       const shuffledKeys = keys.sort(() => Math.random() - 0.5);
+
+      // पाथ से डुप्लीकेट 'models/' को हटाना
+      const cleanModelName = ACTIVE_MODEL.replace(/^models\//, "").trim();
 
       for (let i = 0; i < shuffledKeys.length; i++) {
         const key = shuffledKeys[i];
         const keyTag = `Key(${key.substring(0, 5)}...)`;
 
         try {
-          const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${ACTIVE_MODEL}:generateContent?key=${key}`;
+          const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${cleanModelName}:generateContent?key=${key}`;
           const contents = [{ role: "user", parts: [{ text: userPrompt }] }];
 
           let res = await fetch(apiUrl, {
@@ -108,7 +104,7 @@ export default {
           });
           let data = await res.json().catch(() => ({}));
 
-          // Invalid Argument फ़िक्स
+          // Invalid argument आने पर बिना कॉन्फ़िग के फ़ॉलबैक
           if (data.error && /invalid argument/i.test(data.error.message)) {
             await sleep(1500);
             res = await fetch(apiUrl, {
@@ -119,19 +115,15 @@ export default {
             data = await res.json().catch(() => ({}));
           }
 
-          // Error Handling
           if (data.error) {
             const msg = data.error.message || "Unknown error";
-            errors.push(`${keyTag}: ${msg.substring(0, 90)}`);
+            errors.push(`${keyTag}: ${msg.substring(0, 95)}`);
 
-            // 429 Quota / Rate Limit
             if (/quota|429|RESOURCE_EXHAUSTED|rate limit/i.test(msg)) {
               rateLimitHit = true;
-              // इस की पर लिमिट है, तो अगली की ट्राई करेंगे
               continue;
             }
 
-            // सर्वर या नेटवर्क एरर
             if (/500|502|503|internal|backend/i.test(msg)) {
               await sleep(1000);
               continue;
@@ -140,7 +132,6 @@ export default {
             continue;
           }
 
-          // ✅ सफलता: रिस्पॉन्स मिल गया
           if (data.candidates && data.candidates[0] && data.candidates[0].content) {
             const aiText = (data.candidates[0].content.parts || []).map(p => p.text || "").join("");
             if (aiText.trim()) {
@@ -148,7 +139,7 @@ export default {
                 result: aiText,
                 response: aiText,
                 text: aiText,
-                model: ACTIVE_MODEL,
+                model: cleanModelName,
                 key: keyTag,
                 status: "ok"
               }), { headers });
@@ -160,7 +151,7 @@ export default {
       }
 
       const finalError = rateLimitHit 
-        ? `सभी उपलब्ध Keys की मिनट लिमिट (RPM) पूरी हो गई है। कृपया 10-15 सेकंड बाद पुनः प्रयास करें।`
+        ? `सभी उपलब्ध Keys की मिनट लिमिट पूरी हो गई है। 10-15 सेकंड बाद फिर कोशिश करें।`
         : `सभी API Keys विफल:\n• ${errors.slice(0, 3).join("\n• ")}`;
 
       return new Response(JSON.stringify({ error: finalError }), {
