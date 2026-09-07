@@ -1,199 +1,221 @@
 // =====================================================
-// Aryan Studio Pro - Gemini AI Worker v15 (2026 Models Update)
-// ✅ FIX: Removed deprecated 2.0 models
-// ✅ ADDED: gemini-3.6-flash & gemini-3.5-flash-lite
-// ✅ Ultra Safe Burst Control (Anti 502/429)
+// Aryan Studio Pro - Universal AI Worker v2.0
+// Supports: Gemini 2.5 Flash & Groq Llama 3.3 (70B)
+// Auto Key Rotation + Smart Rate Limit Handling
 // =====================================================
 
-// 🔑 तरीका 1: यहाँ hardcoded keys (optional)
-const HARDCODED_KEYS = [];
+const GEMINI_MODEL = "gemini-2.5-flash";
+const GROQ_MODEL = "llama-3.3-70b-versatile";
 
-// ✅ सही और ACTIVE MODELS (Google के नए 2026 अपडेट के अनुसार)
-const MODELS = [
-  "gemini-2.5-flash",       // PRIMARY (सबसे तेज़ और बड़े डेटा के लिए बेस्ट)
-  "gemini-3.6-flash",       // BACKUP 1 (2.0-flash की जगह नया मॉडल)
-  "gemini-3.5-flash-lite"   // BACKUP 2 (2.0-flash-lite की जगह नया तेज़ मॉडल)
-];
-
-// ग्लोबल वेरिएबल: लगातार आने वाली रिक्वेस्ट को कंट्रोल करने के लिए
-let lastRequestTimestamp = 0;
-
-// 🛡️ ULTRA SAFE TIMERS (मिलीसेकंड में)
-const MIN_DELAY = 4500;     // 4.5 सेकंड का फिक्स गैप (Rate Limit से बचने के लिए)
-const RETRY_DELAY = 5000;   // एरर आने पर 5 सेकंड का रेस्ट
-const INVALID_DELAY = 2000; // Invalid argument पर 2 सेकंड का ब्रेक
-
-// 🕒 स्लीप/वेट फंक्शन
-const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
-
-// Keys collect
-function collectKeys(env) {
-  const keys = new Set();
-  HARDCODED_KEYS.forEach(k => k && keys.add(String(k).trim()));
-  try {
-    if (env) {
-      if (env.GEMINI_KEYS) {
-        String(env.GEMINI_KEYS).split(/[,;\n]+/).forEach(k => k.trim() && keys.add(k.trim()));
-      }
-      if (env.GEMINI_API_KEY) {
-        String(env.GEMINI_API_KEY).split(/[,;\n]+/).forEach(k => k.trim() && keys.add(k.trim()));
-      }
-    }
-  } catch (e) {}
-  return Array.from(keys).filter(k => k.length > 10);
-}
-
-// ✅ Model config (बड़ी न्यूज़ स्क्रिप्ट के लिए Max Tokens)
-function buildGenerationConfig(model, maxTokens) {
-  const config = {
-    maxOutputTokens: maxTokens,
-    temperature: 0.7, 
-    topP: 0.95
-  };
-  
-  // नए 3.x और 2.5 मॉडल्स के लिए Thinking Budget को disable करना ज़रूरी है
-  if (model.includes("2.5") || model.includes("3.")) {
-      config.thinkingConfig = { thinkingBudget: 0 };
-  }
-  return config;
-}
-
-export default {
-  async fetch(request, env) {
-    const headers = {
-      "Access-Control-Allow-Origin": "*",
-      "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-      "Access-Control-Allow-Headers": "Content-Type",
-      "Content-Type": "application/json"
+// ----- HELPER: Gemini API Call -----
+async function callGeminiAPI(apiKey, prompt, maxTokens = 4096) {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`;
+    
+    const payload = {
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        generationConfig: {
+            temperature: 0.7,
+            topP: 0.95,
+            maxOutputTokens: maxTokens,
+            thinkingConfig: { thinkingBudget: 0 }
+        }
     };
 
-    if (request.method === "OPTIONS") return new Response(null, { headers });
+    const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+    });
 
-    if (request.method === "GET") {
-      const keys = collectKeys(env);
-      return new Response(JSON.stringify({
-        status: "ok ✅",
-        worker: "Aryan Studio Pro - Gemini Worker v15",
-        totalKeysLoaded: keys.length,
-        modelsActive: MODELS,
-        protection: "Mathematical Auto-Delay (4.5s) Active 🛡️"
-      }), { headers });
+    const data = await res.json();
+
+    if (!res.ok) {
+        const errMsg = data.error?.message || "Unknown Error";
+        if (res.status === 429 || errMsg.includes("quota") || errMsg.includes("rate limit")) {
+            throw new Error(`429: ${errMsg.substring(0, 50)}`);
+        }
+        throw new Error(`Gemini Error ${res.status}: ${errMsg}`);
     }
 
-    if (request.method !== "POST") {
-      return new Response(JSON.stringify({ error: "केवल POST मान्य है" }), { status: 405, headers });
+    const text = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
+    if (!text) throw new Error("Empty response from Gemini");
+    return text;
+}
+
+// ----- HELPER: Groq API Call (OpenAI Compatible) -----
+async function callGroqAPI(apiKey, prompt, maxTokens = 4096) {
+    const url = "https://api.groq.com/openai/v1/chat/completions";
+    
+    const payload = {
+        model: GROQ_MODEL,
+        messages: [
+            { role: "system", content: "You are a helpful AI assistant. Always respond in valid JSON format only." },
+            { role: "user", content: prompt }
+        ],
+        temperature: 0.7,
+        max_tokens: maxTokens,
+        response_format: { type: "json_object" }
+    };
+
+    const res = await fetch(url, {
+        method: "POST",
+        headers: {
+            "Authorization": `Bearer ${apiKey}`,
+            "Content-Type": "application/json"
+        },
+        body: JSON.stringify(payload)
+    });
+
+    const data = await res.json();
+
+    if (!res.ok) {
+        const errMsg = data.error?.message || "Unknown Error";
+        if (res.status === 429 || errMsg.includes("rate limit")) {
+            throw new Error(`429: ${errMsg.substring(0, 50)}`);
+        }
+        throw new Error(`Groq Error ${res.status}: ${errMsg}`);
     }
 
-    try {
-      const requestData = await request.json().catch(() => ({}));
-      
-      let userPrompt = requestData.prompt || requestData.text || requestData.message || "";
-      if (!userPrompt && requestData.contents) {
-        userPrompt = requestData.contents.map(c => (c.parts || []).map(p => p.text || "").join("\n")).join("\n");
-      }
+    const text = data.choices?.[0]?.message?.content || "";
+    if (!text) throw new Error("Empty response from Groq");
+    return text;
+}
 
-      if (!userPrompt || userPrompt.trim().length === 0) {
-        return new Response(JSON.stringify({ error: "प्रॉम्प्ट खाली है!" }), { status: 400, headers });
-      }
+// ----- MAIN WORKER HANDLER -----
+export default {
+    async fetch(request, env) {
+        const headers = {
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "POST, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type",
+            "Content-Type": "application/json"
+        };
 
-      const keys = collectKeys(env);
-      if (keys.length === 0) {
-        return new Response(JSON.stringify({ error: "❌ कोई API Key नहीं मिली! Worker Settings में GEMINI_KEYS डालें।" }), { status: 500, headers });
-      }
+        if (request.method === "OPTIONS") return new Response(null, { headers });
+        if (request.method !== "POST") {
+            return new Response(JSON.stringify({ error: "Method not allowed" }), { status: 405, headers });
+        }
 
-      const maxTokens = Math.min(8192, parseInt(requestData.maxTokens) || 8192);
-      const errors = [];
-      let lastQuotaMsg = "";
+        try {
+            const body = await request.json();
+            const { engine, keys, action, data } = body;
 
-      // 🛑 MATHEMATICAL BURST CONTROL
-      const now = Date.now();
-      const timeSinceLast = now - lastRequestTimestamp;
-      if (timeSinceLast < MIN_DELAY) {
-        await sleep(MIN_DELAY - timeSinceLast);
-      }
-      lastRequestTimestamp = Date.now();
-
-      // 🔄 SMART KEY ROTATION
-      const shuffledKeys = keys.sort(() => Math.random() - 0.5);
-
-      for (let i = 0; i < shuffledKeys.length; i++) {
-        const key = shuffledKeys[i];
-        const keyTag = `Key(${key.substring(0, 5)}...)`;
-        let keyDead = false;
-
-        for (const model of MODELS) {
-          try {
-            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`;
-            const contents = [{ role: "user", parts: [{ text: userPrompt }] }];
-
-            let res = await fetch(apiUrl, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ contents, generationConfig: buildGenerationConfig(model, maxTokens) })
-            });
-            let data = await res.json().catch(() => ({}));
-
-            // ✅ Invalid argument आने पर बिना कॉन्फ़िगरेशन के ट्राई करें
-            if (data.error && /invalid argument/i.test(data.error.message)) {
-              await sleep(INVALID_DELAY); 
-              res = await fetch(apiUrl, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ contents })
-              });
-              data = await res.json().catch(() => ({}));
+            // --- Validation ---
+            if (!engine || !keys || keys.length === 0) {
+                return new Response(JSON.stringify({ error: "Engine or API Keys missing" }), { status: 400, headers });
+            }
+            if (!action || !data) {
+                return new Response(JSON.stringify({ error: "Action or Data missing" }), { status: 400, headers });
             }
 
-            // ❌ Error handling
-            if (data.error) {
-              const msg = data.error.message || "unknown";
-              errors.push(`${keyTag} → ${model}: ${msg.substring(0, 80)}`);
+            // --- Build Prompt based on Action ---
+            let prompt = "";
+            let maxTokens = 4096;
 
-              // Quota / Rate Limit (429) - 5 सेकंड रेस्ट!
-              if (/quota|429|RESOURCE_EXHAUSTED|retry in/i.test(msg)) {
-                lastQuotaMsg = msg; 
-                keyDead = true; 
-                await sleep(RETRY_DELAY); 
-                break; 
-              }
-              // Google Server Crash (500/502)
-              if (/500|502|internal|backend|no longer available/i.test(msg)) {
-                await sleep(RETRY_DELAY);
-                continue; // मॉडल बंद है या क्रैश है, तो अगले मॉडल पर जाएं
-              }
-              if (/API key not valid|API_KEY_INVALID/i.test(msg)) {
-                continue; 
-              }
-              continue; 
+            if (action === "extract_facts") {
+                const { title, script } = data;
+                if (!script || script.length < 20) {
+                    return new Response(JSON.stringify({ error: "Script is too short or missing" }), { status: 400, headers });
+                }
+                prompt = `You are a professional news analyst. Extract key facts, a clean SEO-friendly title (max 70 chars), and 20-30 high-volume viral tags from the following YouTube video transcript and title.
+
+**Rules:**
+1. **Facts**: List only bullet points of solid facts (What, Who, Where, When, Numbers). Do NOT add any fluff.
+2. **Title**: Rewrite the title to be clean, clickable, and optimized for SEO.
+3. **Tags**: Generate 20-30 comma-separated tags (keywords).
+
+**Input Title:** ${title || "N/A"}
+**Input Script:** ${script.substring(0, 7000)} 
+
+**Output Format (Strict JSON only):**
+{
+  "facts": "1. ...\\n2. ...\\n3. ...",
+  "title": "Clean SEO Title Here",
+  "tags": "tag1, tag2, tag3, ..."
+}`;
+            } 
+            else if (action === "generate_final") {
+                const { title, tags, facts } = data;
+                if (!facts || facts.length < 10) {
+                    return new Response(JSON.stringify({ error: "Facts are missing. Please run Extract Facts first." }), { status: 400, headers });
+                }
+                prompt = `You are a top-tier Hindi YouTube News Anchor and SEO Expert. Using the provided Facts, Title, and Tags, generate a complete viral content package.
+
+**Rules:**
+1. **New Script**: Write a 400-500 word (3-4 min) Hindi script. Start with "नमस्कार! आप देख रहे हैं आर्यन न्यूज़ टेक...". Use a human, conversational tone. Add suspense and questions.
+2. **New Title**: Create a highly clickbait but truthful Hindi title (max 60 chars).
+3. **New Description**: Write a short 3-line description with relevant hashtags.
+4. **New Tags**: Generate 20-30 viral Hindi/English tags.
+
+**Input Title:** ${title || "N/A"}
+**Input Tags:** ${tags || "N/A"}
+**Input Facts:** ${facts}
+
+**Output Format (Strict JSON only):**
+{
+  "new_title": "Your new clickbait title",
+  "new_script": "Your full 400-500 word Hindi script here...",
+  "new_desc": "Your short description with #hashtags",
+  "new_tags": "tag1, tag2, tag3, ..."
+}`;
+                maxTokens = 8192;
+            } else {
+                return new Response(JSON.stringify({ error: "Invalid action" }), { status: 400, headers });
             }
 
-            // ✅ SUCCESS: रिजल्ट मिल गया
-            if (data.candidates && data.candidates[0] && data.candidates[0].content) {
-              const aiText = (data.candidates[0].content.parts || []).map(p => p.text || "").join("");
-              if (aiText.trim()) {
-                return new Response(JSON.stringify({
-                  result: aiText, response: aiText, text: aiText,
-                  model: model, key: keyTag, status: "ok"
-                }), { headers });
-              }
+            // --- Engine Dispatcher with Auto Key Rotation ---
+            let lastError = null;
+            let keysToTry = [...keys];
+
+            for (let i = 0; i < keysToTry.length; i++) {
+                const key = keysToTry[i];
+                try {
+                    let resultText = "";
+                    if (engine === "gemini") {
+                        resultText = await callGeminiAPI(key, prompt, maxTokens);
+                    } else if (engine === "groq") {
+                        resultText = await callGroqAPI(key, prompt, maxTokens);
+                    } else {
+                        return new Response(JSON.stringify({ error: "Unsupported engine" }), { status: 400, headers });
+                    }
+
+                    let parsed;
+                    try {
+                        const cleanJson = resultText.replace(/```json/g, '').replace(/```/g, '').trim();
+                        parsed = JSON.parse(cleanJson);
+                    } catch (e) {
+                        return new Response(JSON.stringify({ 
+                            error: "AI returned invalid JSON",
+                            raw: resultText.substring(0, 200) 
+                        }), { status: 500, headers });
+                    }
+
+                    return new Response(JSON.stringify({ 
+                        success: true, 
+                        data: parsed,
+                        engine: engine,
+                        keyUsed: key.substring(0, 5) + '...' 
+                    }), { headers });
+
+                } catch (error) {
+                    const errString = String(error);
+                    if (errString.includes("429") || errString.includes("rate limit") || errString.includes("quota")) {
+                        lastError = "Rate Limit on key " + (i+1);
+                        continue;
+                    } else {
+                        return new Response(JSON.stringify({ error: errString }), { status: 500, headers });
+                    }
+                }
             }
-          } catch (e) {
-            errors.push(`${keyTag} → ${model}: ${e.message}`);
-          }
-        } 
-        if (keyDead) continue; 
-      } 
 
-      const finalError = lastQuotaMsg 
-        ? `लिमिट पार हो गई है! 10-15 सेकंड बाद फिर कोशिश करें।` 
-        : `सभी API Keys फेल:\n• ${errors.slice(0, 4).join("\n• ")}`;
+            return new Response(JSON.stringify({ 
+                error: "ALL_KEYS_RATE_LIMITED", 
+                message: "सभी API Keys की Rate Limit पार हो गई है। कृपया 1 मिनट बाद पुनः प्रयास करें।",
+                retryAfter: 60 
+            }), { status: 429, headers });
 
-      return new Response(JSON.stringify({ error: finalError }), {
-        status: lastQuotaMsg ? 429 : 502, headers
-      });
-
-    } catch (error) {
-      return new Response(JSON.stringify({ error: "सर्वर एरर: " + error.message }), { status: 500, headers });
+        } catch (error) {
+            return new Response(JSON.stringify({ error: "Server Error: " + String(error) }), { status: 500, headers });
+        }
     }
-  }
 };
