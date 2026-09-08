@@ -1,85 +1,49 @@
 export default {
+  // ध्यान दें: यहाँ 'env' पैरामीटर बहुत ज़रूरी है
   async fetch(request, env) {
     const headers = {
       "Access-Control-Allow-Origin": "*",
       "Access-Control-Allow-Methods": "POST, OPTIONS",
-      "Access-Control-Allow-Headers": "Content-Type",
-      "Content-Type": "application/json"
+      "Access-Control-Allow-Headers": "Content-Type"
     };
 
-    // 1. Preflight OPTIONS
     if (request.method === "OPTIONS") return new Response(null, { headers });
 
-    // 2. Only POST Allowed
     if (request.method !== "POST") {
-      return new Response(JSON.stringify({ error: "केवल POST रिक्वेस्ट मान्य है।" }), { status: 405, headers });
+      return new Response("केवल POST रिक्वेस्ट ही मान्य है।", { status: 405, headers });
     }
 
     try {
-      const requestData = await request.json().catch(() => ({}));
-      const userPrompt = requestData.prompt || requestData.text || "";
+      const requestData = await request.json();
+      const userPrompt = requestData.prompt;
 
-      if (!userPrompt || !userPrompt.trim()) {
+      if (!userPrompt) {
         return new Response(JSON.stringify({ error: "प्रॉम्प्ट खाली है!" }), { status: 400, headers });
       }
 
-      // 🔑 Get API Key from Cloudflare Environment Variables
-      // (आप 2-3 नई Keys कॉमा लगाकर भी डाल सकते हैं: KEY1, KEY2)
-      const rawKey = env.GEMINI_API_KEY || "";
-      const keys = rawKey.split(/[,;\n]+/).map(k => k.trim()).filter(k => k.length > 10);
+      // बदलाव यहाँ हुआ है 👇
+      // अब कोड API Key सीधे Cloudflare की सेटिंग्स से उठाएगा
+      const GEMINI_API_KEY = env.GEMINI_API_KEY; 
 
-      if (!keys.length) {
-        return new Response(JSON.stringify({ error: "Cloudflare सेटिंग्स में GEMINI_API_KEY मौजूद नहीं है!" }), { status: 500, headers });
+      if (!GEMINI_API_KEY) {
+        return new Response(JSON.stringify({ error: "API Key सेट नहीं की गई है!" }), { status: 500, headers });
       }
 
-      // ⚡ आपके निर्देशानुसार मॉडल्स का क्रम (STABLE /v1/ ENDPOINT - NO BETA)
-      const MODELS = [
-        "gemini-2.5-flash", // 1st Priority (Primary)
-        "gemini-1.5-flash", // 2nd Priority
-        "gemini-1.5-pro"    // 3rd Priority
-      ];
+      const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`;
 
-      let detailedErrors = [];
+      const geminiResponse = await fetch(apiUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ contents: [{ parts: [{ text: userPrompt }] }] })
+      });
 
-      for (const key of keys) {
-        for (const model of MODELS) {
-          // 🚫 STRICTLY NO BETA -> Pure Stable /v1/ Endpoint
-          const apiUrl = `https://generativelanguage.googleapis.com/v1/models/${model}:generateContent?key=${key}`;
+      const data = await geminiResponse.json();
+      let aiText = data.candidates[0].content.parts[0].text;
 
-          try {
-            const res = await fetch(apiUrl, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                contents: [{ parts: [{ text: userPrompt }] }]
-              })
-            });
-
-            const data = await res.json().catch(() => ({}));
-
-            if (data.error) {
-              detailedErrors.push(`[${model}]: ${data.error.message || "API Error"}`);
-              continue;
-            }
-
-            if (data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts) {
-              let aiText = data.candidates[0].content.parts.map(p => p.text || "").join("");
-              if (aiText.trim()) {
-                return new Response(JSON.stringify({ result: aiText, modelUsed: model }), { headers });
-              }
-            }
-          } catch (e) {
-            detailedErrors.push(`[${model}]: ${e.message}`);
-          }
-        }
-      }
-
-      return new Response(JSON.stringify({ 
-        error: "गूगल API त्रुटि:\n• " + detailedErrors.join("\n• ") 
-      }), { status: 500, headers });
+      return new Response(JSON.stringify({ result: aiText }), { headers, headers: { ...headers, "Content-Type": "application/json" } });
 
     } catch (error) {
-      return new Response(JSON.stringify({ error: "वर्कर एरर: " + error.message }), { status: 500, headers });
+      return new Response(JSON.stringify({ error: "API काम नहीं कर रही है।" }), { status: 500, headers });
     }
   }
 };
