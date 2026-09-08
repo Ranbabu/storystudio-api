@@ -7,10 +7,10 @@ export default {
       "Content-Type": "application/json"
     };
 
-    // 1. Preflight OPTIONS रिक्वेस्ट के लिए
+    // 1. Preflight OPTIONS
     if (request.method === "OPTIONS") return new Response(null, { headers });
 
-    // 2. केवल POST अलाउड है
+    // 2. Only POST allowed
     if (request.method !== "POST") {
       return new Response(JSON.stringify({ error: "केवल POST रिक्वेस्ट मान्य है।" }), { status: 405, headers });
     }
@@ -23,40 +23,59 @@ export default {
         return new Response(JSON.stringify({ error: "प्रॉम्प्ट खाली है!" }), { status: 400, headers });
       }
 
-      // 🔑 Cloudflare की सेटिंग्स से GEMINI_API_KEY उठाएगा
-      const GEMINI_API_KEY = env.GEMINI_API_KEY; 
+      // 🔑 Key Check
+      const rawKey = env.GEMINI_API_KEY || "";
+      const keys = rawKey.split(/[,;\n]+/).map(k => k.trim()).filter(k => k.length > 10);
 
-      if (!GEMINI_API_KEY) {
+      if (!keys.length) {
         return new Response(JSON.stringify({ error: "API Key (env.GEMINI_API_KEY) सेटिंग्स में नहीं मिली!" }), { status: 500, headers });
       }
 
-      // ⚡ केवल 100% वर्किंग मॉडल: gemini-2.5-flash
-      const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY.trim()}`;
+      // ⚡ स्टेबल (v1) और बीटा (v1beta) दोनों एंडपॉइंट्स की गारंटेड लिस्ट
+      const TARGETS = [
+        { ver: "v1", model: "gemini-1.5-flash" },     // 100% Stable Production (Every Key Works)
+        { ver: "v1", model: "gemini-1.5-pro" },       // High Quality Hindi Production
+        { ver: "v1beta", model: "gemini-1.5-flash" }, // Beta Fallback 1
+        { ver: "v1beta", model: "gemini-2.5-flash" }  // Beta Fallback 2 (For older keys)
+      ];
 
-      const geminiResponse = await fetch(apiUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: userPrompt }] }]
-        })
-      });
+      let lastError = "";
 
-      const data = await geminiResponse.json();
+      // 🔄 ऑटोमैटिक एंडपॉइंट व मॉडल स्विचिंग
+      for (const key of keys) {
+        for (const target of TARGETS) {
+          const apiUrl = `https://generativelanguage.googleapis.com/${target.ver}/models/${target.model}:generateContent?key=${key}`;
 
-      // ❌ गूगल API एरर चेकिंग
-      if (data.error) {
-        return new Response(JSON.stringify({ 
-          error: `Google API Error: ${data.error.message || "Unknown Error"}` 
-        }), { status: 400, headers });
+          try {
+            const res = await fetch(apiUrl, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                contents: [{ parts: [{ text: userPrompt }] }]
+              })
+            });
+
+            const data = await res.json().catch(() => ({}));
+
+            // अगर यह एंडपॉइंट या मॉडल ब्लॉक है, तो तुरंत अगले पर जाएँ
+            if (data.error) {
+              lastError = data.error.message || "Model error";
+              continue;
+            }
+
+            if (data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts) {
+              let aiText = data.candidates[0].content.parts.map(p => p.text || "").join("");
+              if (aiText.trim()) {
+                return new Response(JSON.stringify({ result: aiText, endpointUsed: `${target.ver}/${target.model}` }), { headers });
+              }
+            }
+          } catch (e) {
+            lastError = e.message;
+          }
+        }
       }
 
-      // ✅ सेफ डेटा निष्कर्षण (क्रैश-प्रूफ)
-      if (data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts) {
-        let aiText = data.candidates[0].content.parts.map(p => p.text || "").join("");
-        return new Response(JSON.stringify({ result: aiText }), { headers });
-      } else {
-        return new Response(JSON.stringify({ error: "Gemini से रिस्पॉन्स खाली आया।" }), { status: 500, headers });
-      }
+      return new Response(JSON.stringify({ error: "गूगल API एरर: " + lastError }), { status: 500, headers });
 
     } catch (error) {
       return new Response(JSON.stringify({ error: "वर्कर एरर: " + error.message }), { status: 500, headers });
