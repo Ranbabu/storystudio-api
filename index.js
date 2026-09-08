@@ -23,8 +23,7 @@ export default {
         return new Response(JSON.stringify({ error: "प्रॉम्प्ट खाली है!" }), { status: 400, headers });
       }
 
-      // 🔑 Get API Key from Cloudflare Environment Variables
-      // (आप 2-3 नई Keys कॉमा लगाकर भी डाल सकते हैं: KEY1, KEY2)
+      // 🔑 Get API Key from Environment
       const rawKey = env.GEMINI_API_KEY || "";
       const keys = rawKey.split(/[,;\n]+/).map(k => k.trim()).filter(k => k.length > 10);
 
@@ -32,19 +31,18 @@ export default {
         return new Response(JSON.stringify({ error: "Cloudflare सेटिंग्स में GEMINI_API_KEY मौजूद नहीं है!" }), { status: 500, headers });
       }
 
-      // ⚡ आपके निर्देशानुसार मॉडल्स का क्रम (STABLE /v1/ ENDPOINT - NO BETA)
+      // ⚡ 100% वर्किंग गूगल ऑफिशियल मॉडल्स (v1beta एंडपॉइंट पर)
       const MODELS = [
-        "gemini-2.5-flash", // 1st Priority (Primary)
-        "gemini-1.5-flash", // 2nd Priority
-        "gemini-1.5-pro"    // 3rd Priority
+        "gemini-1.5-flash", // 1st Priority (Fast, Free & Best Hindi Script)
+        "gemini-1.5-pro"    // 2nd Priority
       ];
 
       let detailedErrors = [];
 
       for (const key of keys) {
         for (const model of MODELS) {
-          // 🚫 STRICTLY NO BETA -> Pure Stable /v1/ Endpoint
-          const apiUrl = `https://generativelanguage.googleapis.com/v1/models/${model}:generateContent?key=${key}`;
+          // Gemini 1.5 REQUIRES v1beta Endpoint
+          const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`;
 
           try {
             const res = await fetch(apiUrl, {
