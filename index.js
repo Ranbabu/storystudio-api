@@ -10,7 +10,7 @@ export default {
     // 1. Preflight OPTIONS
     if (request.method === "OPTIONS") return new Response(null, { headers });
 
-    // 2. Only POST allowed
+    // 2. Only POST Allowed
     if (request.method !== "POST") {
       return new Response(JSON.stringify({ error: "केवल POST रिक्वेस्ट मान्य है।" }), { status: 405, headers });
     }
@@ -23,27 +23,28 @@ export default {
         return new Response(JSON.stringify({ error: "प्रॉम्प्ट खाली है!" }), { status: 400, headers });
       }
 
-      // 🔑 Get API Key from Environment
+      // 🔑 Get API Key from Cloudflare Environment Variables
+      // (आप 2-3 नई Keys कॉमा लगाकर भी डाल सकते हैं: KEY1, KEY2)
       const rawKey = env.GEMINI_API_KEY || "";
       const keys = rawKey.split(/[,;\n]+/).map(k => k.trim()).filter(k => k.length > 10);
 
       if (!keys.length) {
-        return new Response(JSON.stringify({ error: "API Key (env.GEMINI_API_KEY) सेटिंग्स में नहीं मिली!" }), { status: 500, headers });
+        return new Response(JSON.stringify({ error: "Cloudflare सेटिंग्स में GEMINI_API_KEY मौजूद नहीं है!" }), { status: 500, headers });
       }
 
-      // ⚡ 100% वर्किंग गूगल ऑफिशियल मॉडल्स (gemini-2.5 हटा दिया गया है)
+      // ⚡ आपके निर्देशानुसार मॉडल्स का क्रम (STABLE /v1/ ENDPOINT - NO BETA)
       const MODELS = [
-        "gemini-1.5-flash", // PRIMARY: 100% Guaranteed Working on ALL keys
-        "gemini-1.5-pro",   // SECONDARY: High Quality Hindi Script
-        "gemini-2.0-flash"  // FALLBACK
+        "gemini-2.5-flash", // 1st Priority (Primary)
+        "gemini-1.5-flash", // 2nd Priority
+        "gemini-1.5-pro"    // 3rd Priority
       ];
 
-      let lastError = "";
+      let detailedErrors = [];
 
-      // 🔄 ऑटोमैटिक मॉडल स्विचिंग
       for (const key of keys) {
         for (const model of MODELS) {
-          const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`;
+          // 🚫 STRICTLY NO BETA -> Pure Stable /v1/ Endpoint
+          const apiUrl = `https://generativelanguage.googleapis.com/v1/models/${model}:generateContent?key=${key}`;
 
           try {
             const res = await fetch(apiUrl, {
@@ -57,8 +58,8 @@ export default {
             const data = await res.json().catch(() => ({}));
 
             if (data.error) {
-              lastError = data.error.message || "Model error";
-              continue; // अगर इस मॉडल में इशू आया तो तुरंत अगले मॉडल पर जाएँ
+              detailedErrors.push(`[${model}]: ${data.error.message || "API Error"}`);
+              continue;
             }
 
             if (data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts) {
@@ -68,12 +69,14 @@ export default {
               }
             }
           } catch (e) {
-            lastError = e.message;
+            detailedErrors.push(`[${model}]: ${e.message}`);
           }
         }
       }
 
-      return new Response(JSON.stringify({ error: "Google API Error: " + lastError }), { status: 500, headers });
+      return new Response(JSON.stringify({ 
+        error: "गूगल API त्रुटि:\n• " + detailedErrors.join("\n• ") 
+      }), { status: 500, headers });
 
     } catch (error) {
       return new Response(JSON.stringify({ error: "वर्कर एरर: " + error.message }), { status: 500, headers });
